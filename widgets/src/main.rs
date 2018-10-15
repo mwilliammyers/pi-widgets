@@ -10,5 +10,5 @@ fn main() {
 
     let routes = warp::get2().and(ping);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 8080));
+    warp::serve(routes).run(([0, 0, 0, 0], 8080));
 }
