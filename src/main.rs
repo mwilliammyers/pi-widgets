@@ -14,6 +14,11 @@ struct RequestBody {
     message: String,
 }
 
+lazy_static! {
+    static ref RE: Regex =
+        Regex::new(r"(?i).*blink(?\s+the)?\s+light\s+(\d+)\s+for\s+(\d+)\s+ms.*").unwrap();
+}
+
 fn blink_led(pin: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::Result<()> {
     info!(
         "blinking led: {} for {}ms with a period of {}ms",
@@ -56,6 +61,7 @@ fn main() {
     env_logger::init();
 
     // TODO: use tokio::spawn?
+    // TODO: get pin num from env
     thread::spawn(|| interrupt(2, || info!("button pressed!")));
 
     let ping = warp::path("ping").map(|| "pong");
@@ -66,26 +72,11 @@ fn main() {
         .map(|body: RequestBody| {
             info!("received LED request: {}", &body.message);
 
-            lazy_static! {
-                static ref RE: Regex = Regex::new(
-                    r"(?ix).*
-                    blink\s*
-                    light\s*
-                    (?:num(?:ber))?\s*
-                    (\d+)\s*
-                    for\s*
-                    (\d+)\s*ms.*"
-                ).unwrap();
-            }
-
             let cap = RE.captures(&body.message).unwrap();
             debug!("parsed request: {:?}", &cap);
 
-            blink_led(
-                cap[1].parse::<u64>().unwrap(),
-                cap[2].parse::<u64>().unwrap(),
-                500,
-            ).unwrap();
+            // TODO: get pin num from env
+            blink_led(2, cap[2].parse::<u64>().unwrap(), 500).unwrap();
 
             "success"
         });
