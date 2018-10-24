@@ -2,10 +2,7 @@ use lazy_static::lazy_static;
 use log::*;
 use regex::Regex;
 use serde_derive::{Deserialize, Serialize};
-use std::env;
-use std::thread;
-use std::thread::sleep;
-use std::time::Duration;
+use std::{env, thread, time::Duration};
 use sysfs_gpio::{Direction, Edge, Pin};
 use warp::Filter;
 
@@ -32,9 +29,9 @@ fn blink_led(pin: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::Result<(
         let iterations = duration_ms / period_ms / 2;
         for _ in 0..iterations {
             led.set_value(0)?;
-            sleep(Duration::from_millis(period_ms));
+            thread::sleep(Duration::from_millis(period_ms));
             led.set_value(1)?;
-            sleep(Duration::from_millis(period_ms));
+            thread::sleep(Duration::from_millis(period_ms));
         }
         led.set_value(0)?;
 
