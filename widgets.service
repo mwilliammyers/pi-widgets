@@ -1,0 +1,12 @@
+[Unit]
+Description=widgets server
+After=network.target
+# After=syslog.target
+
+[Service]
+ExecStart=/usr/local/bin/widgets
+Environment=RUST_LOG=info
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

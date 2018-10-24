@@ -1,19 +1,12 @@
-#[macro_use]
-extern crate log;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate env_logger;
-extern crate sysfs_gpio;
-extern crate warp;
-#[macro_use]
-extern crate lazy_static;
-extern crate regex;
-
+use lazy_static::lazy_static;
+use log::*;
 use regex::Regex;
+use serde_derive::{Deserialize, Serialize};
+use std::env;
+use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use sysfs_gpio::{Direction, Pin};
+use sysfs_gpio::{Direction, Edge, Pin};
 use warp::Filter;
 
 #[derive(Deserialize, Serialize)]
@@ -21,18 +14,16 @@ struct RequestBody {
     message: String,
 }
 
-fn blink_led(pin_number: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::Result<()> {
+fn blink_led(pin: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::Result<()> {
     info!(
         "blinking led: {} for {}ms with a period of {}ms",
-        &pin_number, &duration_ms, &period_ms
+        &pin, &duration_ms, &period_ms
     );
 
-    let led = Pin::new(pin_number);
+    let led = Pin::new(pin);
     led.with_exported(|| {
-        // TODO: replace this with a check to see if it is ready
-        // sleep(Duration::from_millis(200));
-
         led.set_direction(Direction::Low)?;
+
         let iterations = duration_ms / period_ms / 2;
         for _ in 0..iterations {
             led.set_value(0)?;
@@ -41,12 +32,31 @@ fn blink_led(pin_number: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::R
             sleep(Duration::from_millis(period_ms));
         }
         led.set_value(0)?;
+
         Ok(())
+    })
+}
+
+fn interrupt(pin: u64, callback: fn()) -> sysfs_gpio::Result<()> {
+    let input = Pin::new(pin);
+    input.with_exported(|| {
+        input.set_direction(Direction::In)?;
+        input.set_edge(Edge::RisingEdge)?;
+
+        let mut poller = input.get_poller()?;
+        loop {
+            if let Some(1) = poller.poll(1000)? {
+                callback();
+            }
+        }
     })
 }
 
 fn main() {
     env_logger::init();
+
+    // TODO: use tokio::spawn?
+    thread::spawn(|| interrupt(2, || info!("button pressed!")));
 
     let ping = warp::path("ping").map(|| "pong");
 

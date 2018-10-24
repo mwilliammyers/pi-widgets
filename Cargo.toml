@@ -2,7 +2,7 @@
 name = "widgets"
 version = "0.1.0"
 authors = ["William Myers <mwilliammyers@gmail.com>"]
-# edition = "2018"
+edition = "2018"
 
 [dependencies]
 env_logger = "0.5.13"
