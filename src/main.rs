@@ -1,98 +1,85 @@
+use hyper::rt::Future;
 use lazy_static::lazy_static;
 use log::*;
 use regex::Regex;
-use serde_derive::{Deserialize, Serialize};
-use std::{env, net::SocketAddr, thread, time::Duration};
-use sysfs_gpio::{Direction, Edge, Pin};
-use warp::Filter;
+use serde_derive::Deserialize;
+// use serde_json;
+use hyper::Uri;
+use std::{io, thread};
+use warp::{self, path, Filter};
+
+mod button;
+mod config;
+mod fetch;
+mod led;
 
 lazy_static! {
     static ref RE: Regex =
         Regex::new(r"(?i).*blink(?\s+the)?\s+light\s+(\d+)\s+for\s+(\d+)\s+ms.*").unwrap();
-}
-
-#[derive(Deserialize, Debug)]
-struct Config {
-    led_pin: Option<u64>,
-    button_pin: Option<u64>,
-    self_address: SocketAddr,
-    led_address: SocketAddr,
-    led_button_address: SocketAddr,
-    // config_button_address: SocketAddr,
-    display_address: SocketAddr,
-}
-
-#[derive(Deserialize, Serialize)]
-struct RequestBody {
-    message: String,
-}
-
-fn blink_led(pin: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::Result<()> {
-    info!(
-        "blinking led: {} for {}ms with a period of {}ms",
-        &pin, &duration_ms, &period_ms
-    );
-
-    let led = Pin::new(pin);
-    led.with_exported(|| {
-        led.set_direction(Direction::Low)?;
-
-        let iterations = duration_ms / period_ms / 2;
-        for _ in 0..iterations {
-            led.set_value(0)?;
-            thread::sleep(Duration::from_millis(period_ms));
-            led.set_value(1)?;
-            thread::sleep(Duration::from_millis(period_ms));
-        }
-        led.set_value(0)?;
-
-        Ok(())
-    })
-}
-
-fn interrupt(pin: u64, callback: fn()) -> sysfs_gpio::Result<()> {
-    let input = Pin::new(pin);
-    input.with_exported(|| {
-        input.set_direction(Direction::In)?;
-        input.set_edge(Edge::RisingEdge)?;
-
-        let mut poller = input.get_poller()?;
-        loop {
-            if let Some(1) = poller.poll(1000)? {
-                callback();
-            }
-        }
-    })
+    static ref CONFIG: config::EnvVars = config::from_env().unwrap();
 }
 
 fn main() {
     env_logger::init();
 
-    let config = envy::prefixed("WIDGETS_").from_env::<Config>().unwrap();
+    debug!(
+        "self: {}, led: {}, display: {}",
+        CONFIG.self_address, CONFIG.led_address, CONFIG.display_address
+    );
 
-    if let Some(pin) = config.button_pin {
-        thread::spawn(|| interrupt(pin, || info!("button pressed!")));
+    let mut led_args = led::BlinkArguments {
+        duration_ms: 1000,
+        period_ms: 500,
+    };
+
+    if let Some(pin) = CONFIG.led_button_pin {
+        thread::spawn(move || {
+            button::interrupt(pin, || {
+                // TODO: make http call instead
+                led::blink(&CONFIG.led_pin.unwrap(), &led_args).unwrap()
+            })
+        });
+    }
+
+    if let Some(pin) = CONFIG.display_button_pin {
+        thread::spawn(move || {
+            button::interrupt(pin, || {
+
+                let fut = fetch::json(CONFIG.display_address.parse().unwrap())
+                    .map(|args| {
+                        info!("args: {:#?}", args);
+
+                        // led_args.duration_ms = args[0].duration_ms;
+                        // led_args.period_ms = args[0].period_ms;
+                    }).map_err(|e| match e {
+                        fetch::Error::Http(e) => error!("http error: {}", e),
+                        fetch::Error::Json(e) => error!("json parsing error: {}", e),
+                    });
+
+                warp::spawn(fut);
+            })
+        });
     }
 
     let ping = warp::path("ping").map(|| "pong");
 
-    let led = warp::path("led")
-        .and(warp::body::content_length_limit(1024 * 16))
-        .and(warp::body::json())
-        .map(|body: RequestBody| {
-            info!("received LED request: {}", &body.message);
+    let led_configure = path!("led" / "configure").map(|| {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
 
-            if let Some(pin) = config.led_pin {
-                let cap = RE.captures(&body.message).unwrap();
-                debug!("parsed request: {:?}", &cap);
+        let cap = RE.captures(&input).unwrap();
 
-                blink_led(pin, cap[2].parse::<u64>().unwrap(), 500).unwrap();
-            }
+        debug!("parsed user input: {:?}", &cap);
 
-            "success"
-        });
+        let new_led_args = led::BlinkArguments {
+            duration_ms: cap[2].parse().unwrap(),
+            // TODO: get this from the user too
+            period_ms: 500,
+        };
 
-    let routes = warp::get2().and(ping).or(warp::post2().and(led));
+        warp::reply::json(&new_led_args)
+    });
 
-    warp::serve(routes).run(config.self_address);
+    let routes = warp::get2().and(ping).or(warp::post2().and(led_configure));
+    warp::serve(routes).run(CONFIG.self_address);
 }
