@@ -17,6 +17,8 @@ pub fn json(url: hyper::Uri) -> impl Future<Item = Vec<BlinkArguments>, Error = 
         .and_then(|res| res.into_body().concat2())
         .from_err::<Error>()
         .and_then(|body| {
+            debug!("received response");
+
             let args = serde_json::from_slice(&body)?;
             Ok(args)
         }).from_err()

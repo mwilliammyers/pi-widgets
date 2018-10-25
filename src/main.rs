@@ -4,7 +4,7 @@ use log::*;
 use regex::Regex;
 use serde_derive::Deserialize;
 // use serde_json;
-use hyper::Uri;
+use hyper;
 use std::{io, thread};
 use warp::{self, path, Filter};
 
@@ -44,7 +44,6 @@ fn main() {
     if let Some(pin) = CONFIG.display_button_pin {
         thread::spawn(move || {
             button::interrupt(pin, || {
-
                 let fut = fetch::json(CONFIG.display_address.parse().unwrap())
                     .map(|args| {
                         info!("args: {:#?}", args);
@@ -56,7 +55,7 @@ fn main() {
                         fetch::Error::Json(e) => error!("json parsing error: {}", e),
                     });
 
-                warp::spawn(fut);
+                hyper::rt::run(fut);
             })
         });
     }
@@ -80,6 +79,8 @@ fn main() {
         warp::reply::json(&new_led_args)
     });
 
-    let routes = warp::get2().and(ping).or(warp::post2().and(led_configure));
+    let routes = warp::get2()
+        .and(ping.or(led_configure))
+        .or(warp::post2().and(led_configure));
     warp::serve(routes).run(CONFIG.self_address);
 }

@@ -27,7 +27,8 @@ fn default_led_address() -> String {
 }
 
 fn default_display_address() -> String {
-    "http://macpro.local:8080/led/configure".to_owned()
+    // "http://macpro.local:8080/led/configure".to_owned()
+    "http://192.168.1.169:8080/led/configure".to_owned()
 }
 
 pub fn from_env() -> Result<EnvVars, envy::Error> {
