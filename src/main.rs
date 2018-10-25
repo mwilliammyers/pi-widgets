@@ -2,18 +2,29 @@ use lazy_static::lazy_static;
 use log::*;
 use regex::Regex;
 use serde_derive::{Deserialize, Serialize};
-use std::{env, thread, time::Duration};
+use std::{env, net::SocketAddr, thread, time::Duration};
 use sysfs_gpio::{Direction, Edge, Pin};
 use warp::Filter;
-
-#[derive(Deserialize, Serialize)]
-struct RequestBody {
-    message: String,
-}
 
 lazy_static! {
     static ref RE: Regex =
         Regex::new(r"(?i).*blink(?\s+the)?\s+light\s+(\d+)\s+for\s+(\d+)\s+ms.*").unwrap();
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    led_pin: Option<u64>,
+    button_pin: Option<u64>,
+    self_address: SocketAddr,
+    led_address: SocketAddr,
+    led_button_address: SocketAddr,
+    // config_button_address: SocketAddr,
+    display_address: SocketAddr,
+}
+
+#[derive(Deserialize, Serialize)]
+struct RequestBody {
+    message: String,
 }
 
 fn blink_led(pin: u64, duration_ms: u64, period_ms: u64) -> sysfs_gpio::Result<()> {
@@ -57,9 +68,11 @@ fn interrupt(pin: u64, callback: fn()) -> sysfs_gpio::Result<()> {
 fn main() {
     env_logger::init();
 
-    // TODO: use tokio::spawn?
-    // TODO: get pin num from env
-    thread::spawn(|| interrupt(2, || info!("button pressed!")));
+    let config = envy::prefixed("WIDGETS_").from_env::<Config>().unwrap();
+
+    if let Some(pin) = config.button_pin {
+        thread::spawn(|| interrupt(pin, || info!("button pressed!")));
+    }
 
     let ping = warp::path("ping").map(|| "pong");
 
@@ -69,16 +82,17 @@ fn main() {
         .map(|body: RequestBody| {
             info!("received LED request: {}", &body.message);
 
-            let cap = RE.captures(&body.message).unwrap();
-            debug!("parsed request: {:?}", &cap);
+            if let Some(pin) = config.led_pin {
+                let cap = RE.captures(&body.message).unwrap();
+                debug!("parsed request: {:?}", &cap);
 
-            // TODO: get pin num from env
-            blink_led(2, cap[2].parse::<u64>().unwrap(), 500).unwrap();
+                blink_led(pin, cap[2].parse::<u64>().unwrap(), 500).unwrap();
+            }
 
             "success"
         });
 
     let routes = warp::get2().and(ping).or(warp::post2().and(led));
 
-    warp::serve(routes).run(([0, 0, 0, 0], 8080));
+    warp::serve(routes).run(config.self_address);
 }
