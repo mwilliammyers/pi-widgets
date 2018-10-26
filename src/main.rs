@@ -5,7 +5,7 @@ use regex::Regex;
 use serde_derive::Deserialize;
 // use serde_json;
 use hyper;
-use std::{io, thread};
+use std::{io, io::Write, thread};
 use warp::{self, path, Filter};
 
 mod button;
@@ -15,7 +15,7 @@ mod led;
 
 lazy_static! {
     static ref RE: Regex =
-        Regex::new(r"(?i).*blink(?\s+the)?\s+light\s+(\d+)\s+for\s+(\d+)\s+ms.*").unwrap();
+        Regex::new(r"(?i).*blink(?:\s+the)?\s+light\s+for\s+(\d+)\s*ms.*").unwrap();
     static ref CONFIG: config::EnvVars = config::from_env().unwrap();
 }
 
@@ -48,7 +48,7 @@ fn main() {
             button::interrupt(pin, || {
                 let fut = fetch::json(CONFIG.display_address.parse().unwrap())
                     .map(|args| {
-                        info!("args: {:#?}", args);
+                        info!("args: {:?}", args);
 
                         // led_args.duration_ms = args[0].duration_ms;
                         // led_args.period_ms = args[0].period_ms;
@@ -65,20 +65,23 @@ fn main() {
     let ping = warp::path("ping").map(|| "pong");
 
     let led_configure = path!("led" / "configure").map(|| {
+        print!("New configuration? ");
+        io::stdout().flush().unwrap();
+
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
+        debug!("user input: {}", &input);
 
         let cap = RE.captures(&input).unwrap();
-
         debug!("parsed user input: {:?}", &cap);
 
         let new_led_args = led::BlinkArguments {
-            duration_ms: cap[2].parse().unwrap(),
+            duration_ms: cap[1].parse().unwrap(),
             // TODO: get this from the user too
             period_ms: 500,
         };
 
-        warp::reply::json(&new_led_args)
+        warp::reply::json(&[new_led_args])
     });
 
     let routes = warp::get2()
