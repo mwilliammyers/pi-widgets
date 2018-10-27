@@ -1,30 +1,27 @@
 use log::*;
 use serde_derive::{Deserialize, Serialize};
 use std::{thread, time::Duration};
-use sysfs_gpio::{Direction, Pin};
+// use sysfs_gpio::{Direction, Pin};
+use rppal::gpio::{Gpio, Level, Mode};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
 pub struct BlinkArguments {
     pub duration_ms: u64,
     pub period_ms: u64,
 }
 
-pub fn blink(pin: &u64, args: &BlinkArguments) -> sysfs_gpio::Result<()> {
-    debug!("Blinking LED...");
+pub fn blink(pin: &u8, args: &BlinkArguments) {
+    debug!("{:?}", &args);
 
-    let led = Pin::new(*pin);
-    led.with_exported(|| {
-        led.set_direction(Direction::Low)?;
+    let mut gpio = Gpio::new().unwrap();
+    gpio.set_mode(*pin, Mode::Output);
 
-        let iterations = args.duration_ms / args.period_ms / 2;
-        for _ in 0..iterations {
-            led.set_value(0)?;
-            thread::sleep(Duration::from_millis(args.period_ms));
-            led.set_value(1)?;
-            thread::sleep(Duration::from_millis(args.period_ms));
-        }
-        led.set_value(0)?;
-
-        Ok(())
-    })
+    let iterations = args.duration_ms / args.period_ms / 2;
+    for _ in 0..iterations {
+        gpio.write(*pin, Level::Low);
+        thread::sleep(Duration::from_millis(args.period_ms));
+        gpio.write(*pin, Level::High);
+        thread::sleep(Duration::from_millis(args.period_ms));
+    }
+    gpio.write(*pin, Level::Low);
 }

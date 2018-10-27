@@ -16,7 +16,6 @@ mod led;
 lazy_static! {
     static ref RE: Regex =
         Regex::new(r"(?i).*blink(?:\s+the)?\s+light\s+for\s+(\d+)\s*ms.*").unwrap();
-    static ref CONFIG: config::EnvVars = config::from_env().unwrap();
 }
 
 fn main() {
@@ -24,42 +23,35 @@ fn main() {
         .default_format_timestamp(false)
         .init();
 
-    debug!(
-        "self: {}, led: {}, display: {}",
-        CONFIG.self_address, CONFIG.led_address, CONFIG.display_address
-    );
+    let CONFIG = config::from_env().unwrap().clone();
 
     let mut led_args = led::BlinkArguments {
-        duration_ms: 1000,
-        period_ms: 500,
+        duration_ms: 4000,
+        period_ms: 750,
     };
 
-    if let Some(pin) = CONFIG.led_button_pin {
-        thread::spawn(move || {
-            button::interrupt(pin, || {
-                // TODO: make http call instead
-                led::blink(&CONFIG.led_pin.unwrap(), &led_args).unwrap()
-            })
+    if let Some(ref pin) = &CONFIG.led_button_pin {
+        button::interrupt(&pin, |level| {
+            // TODO: make http call instead
+            led::blink(&CONFIG.led_pin.unwrap(), &led_args);
         });
     }
 
-    if let Some(pin) = CONFIG.display_button_pin {
-        thread::spawn(move || {
-            button::interrupt(pin, || {
-                let fut = fetch::json(CONFIG.display_address.parse().unwrap())
-                    .map(|args| {
-                        info!("args: {:?}", args);
+    if let Some(ref pin) = CONFIG.display_button_pin {
+        // thread::spawn(|| {
+        button::interrupt(pin, |level| {
+            let fut = fetch::json(CONFIG.display_address.parse().unwrap())
+                .map(|args| {
+                    info!("args: {:?}", args);
+                    led_args = args[0];
+                }).map_err(|e| match e {
+                    fetch::Error::Http(e) => error!("http error: {}", e),
+                    fetch::Error::Json(e) => error!("json parsing error: {}", e),
+                });
 
-                        // led_args.duration_ms = args[0].duration_ms;
-                        // led_args.period_ms = args[0].period_ms;
-                    }).map_err(|e| match e {
-                        fetch::Error::Http(e) => error!("http error: {}", e),
-                        fetch::Error::Json(e) => error!("json parsing error: {}", e),
-                    });
-
-                hyper::rt::run(fut);
-            })
-        });
+            hyper::rt::run(fut);
+        })
+        // });
     }
 
     let ping = warp::path("ping").map(|| "pong");
