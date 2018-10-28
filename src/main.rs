@@ -1,13 +1,13 @@
-use lazy_static::lazy_static;
-use log::*;
-use regex::Regex;
-use serde_derive::Deserialize;
-// use serde_json;
 use futures::{future, Future};
 use hyper::{
     client::HttpConnector, header, service::service_fn, Body, Client, Method, Request, Response,
     Server, StatusCode,
 };
+use lazy_static::lazy_static;
+use log::*;
+use regex::Regex;
+use serde_derive::Deserialize;
+use serde_json as serde;
 use std::{io, io::Write, time::Duration};
 
 mod config;
@@ -48,7 +48,7 @@ fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
             Box::new(future::ok(
                 Response::builder()
                     .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(serde_json::to_string(&new_led_args).unwrap()))
+                    .body(Body::from(serde::to_string(&new_led_args).unwrap()))
                     .unwrap(),
             ))
         }
