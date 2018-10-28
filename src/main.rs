@@ -24,11 +24,9 @@ lazy_static! {
 }
 
 fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
-    let (parts, _body) = req.into_parts();
-
-    match (parts.method, parts.uri.path()) {
-        (Method::GET, "/ping") => Box::new(future::ok(Response::new(Body::from(PONG)))),
-        (Method::GET, "/led/configure") => {
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/ping") => Box::new(future::ok(Response::new(Body::from(PONG)))),
+        (&Method::GET, "/led/configure") => {
             print!("New configuration? ");
             io::stdout().flush().unwrap();
 
