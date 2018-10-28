@@ -29,38 +29,38 @@ fn main() {
         CONFIG.self_address, CONFIG.led_address, CONFIG.display_address
     );
 
-    let mut led_args = led::BlinkArguments {
-        duration_ms: 1000,
-        period_ms: 500,
-    };
+    thread::spawn(|| {
+        let mut led_args = led::BlinkArguments {
+            duration_ms: 1000,
+            period_ms: 500,
+        };
 
-    if let Some(pin) = CONFIG.led_button_pin {
-        thread::spawn(move || {
-            button::interrupt(pin, || {
-                // TODO: make http call instead
-                led::blink(&CONFIG.led_pin.unwrap(), &led_args).unwrap()
-            })
-        });
-    }
+        let mut led_button = button::get_poller(&CONFIG.led_button_pin).unwrap();
 
-    if let Some(pin) = CONFIG.display_button_pin {
-        thread::spawn(move || {
-            button::interrupt(pin, || {
+        let mut display_button = button::get_poller(&CONFIG.display_button_pin).unwrap();
+
+        loop {
+            if let Some(1) = &led_button.poll(1000).unwrap() {
+                led::blink(&CONFIG.led_pin, &led_args).unwrap();
+            }
+
+            if let Some(1) = &display_button.poll(1000).unwrap() {
                 let fut = fetch::json(CONFIG.display_address.parse().unwrap())
-                    .map(|args| {
+                    .map(move |args| {
                         info!("args: {:?}", args);
 
+                        led_args = args[0];
                         // led_args.duration_ms = args[0].duration_ms;
                         // led_args.period_ms = args[0].period_ms;
                     }).map_err(|e| match e {
                         fetch::Error::Http(e) => error!("http error: {}", e),
                         fetch::Error::Json(e) => error!("json parsing error: {}", e),
-                    });
+                    }).nth(0)
 
                 hyper::rt::run(fut);
-            })
-        });
-    }
+            }
+        }
+    });
 
     let ping = warp::path("ping").map(|| "pong");
 

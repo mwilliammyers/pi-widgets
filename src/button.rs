@@ -1,18 +1,10 @@
 use log::*;
-use sysfs_gpio::{Direction, Edge, Pin};
+use sysfs_gpio::{Direction, Edge, Pin, PinPoller};
 
-pub fn interrupt<F: Fn()>(pin: u64, callback: F) -> sysfs_gpio::Result<()> {
-    let input = Pin::new(pin);
-    input.with_exported(|| {
-        input.set_direction(Direction::In)?;
-        input.set_edge(Edge::RisingEdge)?;
-
-        let mut poller = input.get_poller()?;
-        loop {
-            if let Some(1) = poller.poll(1000)? {
-                debug!("pressed...");
-                callback();
-            }
-        }
-    })
+pub fn get_poller(pin: &u64) -> sysfs_gpio::Result<PinPoller> {
+    let input = Pin::new(*pin);
+    input.export()?;
+    input.set_direction(Direction::In)?;
+    input.set_edge(Edge::RisingEdge)?;
+    input.get_poller()
 }
