@@ -5,7 +5,7 @@ use regex::Regex;
 use serde_derive::Deserialize;
 // use serde_json;
 use hyper;
-use std::{io, io::Write, thread};
+use std::{io, io::Write, thread, time::Duration, vec::Vec};
 use warp::{self, path, Filter};
 
 mod button;
@@ -24,40 +24,44 @@ fn main() {
         .default_format_timestamp(false)
         .init();
 
-    debug!(
-        "self: {}, led: {}, display: {}",
-        CONFIG.self_address, CONFIG.led_address, CONFIG.display_address
-    );
-
-    let mut led_args = led::BlinkArguments {
-        duration_ms: 1000,
-        period_ms: 500,
-    };
-
-    if let Some(pin) = CONFIG.led_button_pin {
-        thread::spawn(move || {
-            button::interrupt(pin, || {
-                // TODO: make http call instead
-                led::blink(&CONFIG.led_pin.unwrap(), &led_args).unwrap()
-            })
-        });
+    let mut gpio_lines = Vec::new();
+    for line in &[CONFIG.led_button_line, CONFIG.display_button_line] {
+        if let Some(l) = *line {
+            gpio_lines.push(l);
+        }
     }
 
-    if let Some(pin) = CONFIG.display_button_pin {
+    if !gpio_lines.is_empty() {
         thread::spawn(move || {
-            button::interrupt(pin, || {
-                let fut = fetch::json(CONFIG.display_address.parse().unwrap())
-                    .map(|args| {
-                        info!("args: {:?}", args);
+            let mut led_args = led::BlinkArguments {
+                duration: Duration::from_millis(1000),
+                period: Duration::from_millis(250),
+            };
 
-                        // led_args.duration_ms = args[0].duration_ms;
-                        // led_args.period_ms = args[0].period_ms;
-                    }).map_err(|e| match e {
-                        fetch::Error::Http(e) => error!("http error: {}", e),
-                        fetch::Error::Json(e) => error!("json parsing error: {}", e),
-                    });
+            button::interrupt(&CONFIG.gpio_chip, &gpio_lines, move |line, _event| {
+                if let Some(led_button_line) = CONFIG.led_button_line {
+                    if line == led_button_line {
+                        // TODO: make http call instead
+                        led::blink(&CONFIG.gpio_chip, &CONFIG.led_line.unwrap(), &led_args).unwrap()
+                    }
+                }
 
-                hyper::rt::run(fut);
+                // if let Some(display_button_line) = CONFIG.display_button_line {
+                //     if line == display_button_line {
+                //         let fut = fetch::json(CONFIG.display_address.parse().unwrap())
+                //             .map(|args| {
+                //                 info!("args: {:?}", args);
+
+                //                 led_args.duration = args[0].duration;
+                //                 led_args.period = args[0].period;
+                //             }).map_err(|e| match e {
+                //                 fetch::Error::Http(e) => error!("http error: {}", e),
+                //                 fetch::Error::Json(e) => error!("json parsing error: {}", e),
+                //             });
+
+                //         hyper::rt::run(fut);
+                //     }
+                // }
             })
         });
     }
@@ -76,9 +80,9 @@ fn main() {
         debug!("parsed user input: {:?}", &cap);
 
         let new_led_args = led::BlinkArguments {
-            duration_ms: cap[1].parse().unwrap(),
+            duration: Duration::from_millis(cap[1].parse().unwrap()),
             // TODO: get this from the user too
-            period_ms: 500,
+            period: Duration::from_millis(500),
         };
 
         warp::reply::json(&[new_led_args])

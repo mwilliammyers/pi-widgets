@@ -1,30 +1,33 @@
+use gpio_cdev::*;
 use log::*;
 use serde_derive::{Deserialize, Serialize};
-use std::{thread, time::Duration};
-use sysfs_gpio::{Direction, Pin};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BlinkArguments {
-    pub duration_ms: u64,
-    pub period_ms: u64,
+    pub duration: Duration,
+    pub period: Duration,
 }
 
-pub fn blink(pin: &u64, args: &BlinkArguments) -> sysfs_gpio::Result<()> {
-    debug!("Blinking LED...");
+pub fn blink(chip: &String, line: &u32, args: &BlinkArguments) -> errors::Result<()> {
+    debug!("blinking {:?}...", &args);
 
-    let led = Pin::new(*pin);
-    led.with_exported(|| {
-        led.set_direction(Direction::Low)?;
+    let mut chip = Chip::new(chip)?;
 
-        let iterations = args.duration_ms / args.period_ms / 2;
-        for _ in 0..iterations {
-            led.set_value(0)?;
-            thread::sleep(Duration::from_millis(args.period_ms));
-            led.set_value(1)?;
-            thread::sleep(Duration::from_millis(args.period_ms));
-        }
-        led.set_value(0)?;
+    let handle = chip
+        .get_line(*line)?
+        .request(LineRequestFlags::OUTPUT, 1, "readinput")?;
 
-        Ok(())
-    })
+    let start_time = Instant::now();
+    while start_time.elapsed() < args.duration {
+        thread::sleep(args.period);
+        handle.set_value(0)?;
+        thread::sleep(args.period);
+        handle.set_value(1)?;
+    }
+
+    Ok(())
 }
