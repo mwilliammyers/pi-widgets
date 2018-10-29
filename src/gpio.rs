@@ -162,35 +162,3 @@ pub fn init() {
         });
     }
 }
-
-// TODO: do not hardcode config
-// pub fn init() {
-//     thread::spawn(|| {
-//         button::interrupt("/dev/gpiochip0".to_string(), vec![5, 6], |line, _event| {
-//             // LED button
-//             if line == 5 {
-//                 let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
-
-//                 let fut = Client::new()
-//                     .request(Request::post("http://raspberrypi.local".parse().unwrap()).body(body).unwrap())
-//                     .map(|res| debug!("{}", res.status()))
-//                     .map_err(|err| error!("{}", err));
-
-//                 hyper::rt::spawn(fut);
-//             }
-
-//             // display button
-//             if line == 6 {
-//                 let fut = Client::new()
-//                     .get("".parse().unwrap())
-//                     .and_then(|res| res.into_body().concat2())
-//                     .and_then(|body| {
-//                         fs::write("/tmp/widgets.json", body).unwrap();
-//                         Ok(())
-//                     }).map_err(|err| error!("{}", err));
-
-//                 hyper::rt::spawn(fut);
-//             }
-//         }).unwrap();
-//     });
-// }
