@@ -1,4 +1,4 @@
-use futures::{future, Future};
+use futures::{future, stream::Stream, Future};
 use hyper::{
     client::HttpConnector, header, service::service_fn, Body, Client, Method, Request, Response,
     Server, StatusCode,
@@ -26,6 +26,16 @@ lazy_static! {
 fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/ping") => Box::new(future::ok(Response::new(Body::from(PONG)))),
+        (&Method::POST, "/led") => {
+            req.into_body().concat2().and_then(|body| {
+                let blink_args = serde::from_slice(&body).unwrap();
+                // TODO: do not hard code this
+                gpio::led::blink("/dev/gpiochip0".to_string(), 26, blink_args).unwrap();
+                Ok(())
+            });
+
+            Box::new(future::ok(Response::new(Body::empty())))
+        }
         (&Method::GET, "/led/configure") => {
             print!("New configuration? ");
             io::stdout().flush().unwrap();
@@ -39,14 +49,17 @@ fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
 
             let new_led_args = gpio::led::BlinkArguments {
                 duration: Duration::from_millis(caps[1].parse().unwrap()),
-                // TODO: get this from the user too
+                // TODO: get from user too
                 period: Duration::from_millis(500),
             };
+
+            let foo = serde::to_string(&new_led_args).unwrap();
+            info!("{:?}", &foo);
 
             Box::new(future::ok(
                 Response::builder()
                     .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(serde::to_string(&new_led_args).unwrap()))
+                    .body(Body::from(foo))
                     .unwrap(),
             ))
         }

@@ -15,17 +15,27 @@ pub mod led {
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct BlinkArguments {
+        #[serde(default = "default_duration")]
         pub duration: Duration,
+        #[serde(default = "default_period")]
         pub period: Duration,
     }
 
-    pub fn blink(chip: &String, line: &u32, args: &BlinkArguments) -> errors::Result<()> {
+    fn default_duration() -> Duration {
+        Duration::from_millis(4000)
+    }
+
+    fn default_period() -> Duration {
+        Duration::from_millis(500)
+    }
+
+    pub fn blink(chip: String, line: u32, args: BlinkArguments) -> errors::Result<()> {
         debug!("{:?}", &args);
 
         let mut chip = Chip::new(chip)?;
 
         let handle = chip
-            .get_line(*line)?
+            .get_line(line)?
             .request(LineRequestFlags::OUTPUT, 1, "readinput")?;
 
         let start_time = Instant::now();
@@ -48,9 +58,9 @@ mod button {
 
     type PollEventFlags = nix::poll::EventFlags;
 
-    pub fn interrupt<F>(chip: &String, lines: &Vec<u32>, mut callback: F) -> errors::Result<()>
+    pub fn interrupt<F>(chip: String, lines: Vec<u32>, callback: F) -> errors::Result<()>
     where
-        F: FnMut(u32, gpio_cdev::LineEvent) + 'static,
+        F: Fn(u32, gpio_cdev::LineEvent),
     {
         let mut chip = Chip::new(chip)?;
 
@@ -58,7 +68,7 @@ mod button {
         let mut evt_handles: Vec<LineEventHandle> = lines
             .into_iter()
             .map(|off| {
-                let line = chip.get_line(*off).unwrap();
+                let line = chip.get_line(off).unwrap();
                 line.events(
                     LineRequestFlags::INPUT,
                     EventRequestFlags::RISING_EDGE,
@@ -120,20 +130,11 @@ pub fn init(
         }
     }
 
-    // let mut led_args = led::BlinkArguments {
-    //     duration: Duration::from_millis(1000),
-    //     period: Duration::from_millis(250),
-    // };
-
     if !gpio_lines.is_empty() {
         thread::spawn(|| {
-            button::interrupt(&gpio_chip, &gpio_lines, |line, _event| {
+            button::interrupt(gpio_chip, gpio_lines, |line, _event| {
                 if let Some(led_button_line) = led_button_line {
                     if line == led_button_line {
-                        // let json_file_path = Path::new("/tmp/widgets.json");
-                        // let json_file = File::open(json_file_path);
-                        // let deserialized_camera: SomeDataType = serde_json::from_reader(json_file);
-
                         let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
 
                         let fut = Client::new()
