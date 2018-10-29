@@ -38,11 +38,15 @@ pub mod led {
             .request(LineRequestFlags::OUTPUT, 1, "readinput")?;
 
         let start_time = Instant::now();
-        while start_time.elapsed() < args.duration {
+        loop {
+            if start_time.elapsed() >= args.duration {
+                break;
+            }
+
+            handle.set_value(1)?;
             thread::sleep(args.period);
             handle.set_value(0)?;
             thread::sleep(args.period);
-            handle.set_value(1)?;
         }
 
         Ok(())
