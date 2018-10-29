@@ -15,18 +15,24 @@ mod gpio;
 
 type BoxFut = Box<Future<Item = Response<Body>, Error = hyper::Error> + Send>;
 
-static NOTFOUND: &[u8] = b"Not Found";
+static NOT_FOUND: &[u8] = b"Not Found";
 static PONG: &[u8] = b"Pong";
 
 lazy_static! {
-    static ref RE: Regex =
-        Regex::new(r"(?i).*blink(?:\s+the)?\s+light\s+for\s+(\d+)\s*ms.*").unwrap();
     static ref CONFIG: config::EnvVars = config::from_env().unwrap();
+    static ref BLINK_REGEX: Regex = Regex::new(
+        r"(?ix)
+        .*
+        (?:blink(?:\s+the)?)\s+(?:light|led)
+        (?:\s+for\s+(\d+)\s*ms)?
+        (?:\s+with\s*a\s*(?:period|freq(?:uency)?)\s*of\s*(\d+)\s*ms)?
+        (?:\s+on\s*(\S+))?
+        .*"
+    ).unwrap();
 }
 
 fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/ping") => Box::new(future::ok(Response::new(Body::from(PONG)))),
         (&Method::POST, "/led") => Box::new(req.into_body().concat2().and_then(|body| {
             let blink_args = serde::from_slice(&body).unwrap();
             debug!("{:?}", &body);
@@ -40,15 +46,17 @@ fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
 
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
-            debug!("user input: {}", &input);
 
-            let caps = RE.captures(&input).unwrap();
-            debug!("parsed user input: {:?}", &caps);
+            let caps = BLINK_REGEX.captures(&input).unwrap();
+            debug!("parsed config: {:?}", &caps);
 
             let new_led_args = gpio::led::BlinkArguments {
-                duration: Duration::from_millis(caps[1].parse().unwrap()),
-                // TODO: get from user too
-                period: Duration::from_millis(500),
+                duration: Duration::from_millis(
+                    caps.get(1).map_or("5000", |m| m.as_str()).parse().unwrap(),
+                ),
+                period: Duration::from_millis(
+                    caps.get(2).map_or("250", |m| m.as_str()).parse().unwrap(),
+                ),
             };
 
             Box::new(future::ok(
@@ -58,10 +66,11 @@ fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
                     .unwrap(),
             ))
         }
+        (&Method::GET, "/ping") => Box::new(future::ok(Response::new(Body::from(PONG)))),
         _ => Box::new(future::ok(
             Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Body::from(NOTFOUND))
+                .body(Body::from(NOT_FOUND))
                 .unwrap(),
         )),
     }
