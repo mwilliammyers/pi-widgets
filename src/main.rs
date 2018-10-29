@@ -21,21 +21,19 @@ static PONG: &[u8] = b"Pong";
 lazy_static! {
     static ref RE: Regex =
         Regex::new(r"(?i).*blink(?:\s+the)?\s+light\s+for\s+(\d+)\s*ms.*").unwrap();
+    static ref CONFIG: config::EnvVars = config::from_env().unwrap();
 }
 
 fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/ping") => Box::new(future::ok(Response::new(Body::from(PONG)))),
-        (&Method::POST, "/led") => {
-            req.into_body().concat2().and_then(|body| {
-                let blink_args = serde::from_slice(&body).unwrap();
-                // TODO: do not hard code this
-                gpio::led::blink("/dev/gpiochip0".to_string(), 26, blink_args).unwrap();
-                Ok(())
-            });
+        (&Method::POST, "/led") => Box::new(req.into_body().concat2().and_then(|body| {
+            let blink_args = serde::from_slice(&body).unwrap();
+            debug!("{:?}", &body);
+            gpio::led::blink(&CONFIG.gpio_chip, &CONFIG.led_line.unwrap(), &blink_args).unwrap();
 
-            Box::new(future::ok(Response::new(Body::empty())))
-        }
+            future::ok(Response::new(Body::empty()))
+        })),
         (&Method::GET, "/led/configure") => {
             print!("New configuration? ");
             io::stdout().flush().unwrap();
@@ -53,13 +51,10 @@ fn route(req: Request<Body>, _client: &Client<HttpConnector>) -> BoxFut {
                 period: Duration::from_millis(500),
             };
 
-            let foo = serde::to_string(&new_led_args).unwrap();
-            info!("{:?}", &foo);
-
             Box::new(future::ok(
                 Response::builder()
                     .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(foo))
+                    .body(Body::from(serde::to_string(&new_led_args).unwrap()))
                     .unwrap(),
             ))
         }
@@ -77,22 +72,13 @@ fn main() {
         .default_format_timestamp(false)
         .init();
 
+    gpio::init();
+
     hyper::rt::run(future::lazy(move || {
         let client = Client::new();
 
-        let config = config::from_env().unwrap();
-
-        gpio::init(
-            config.gpio_chip,
-            config.led_line,
-            config.led_button_line,
-            config.display_button_line,
-            config.led_address.parse().unwrap(),
-            config.display_address.parse().unwrap(),
-        );
-
-        info!("listening on http://{}", &config.self_address);
-        Server::bind(&config.self_address)
+        info!("listening on http://{}", &CONFIG.self_address);
+        Server::bind(&CONFIG.self_address)
             .serve(move || {
                 let client = client.clone();
                 service_fn(move |req| route(req, &client))

@@ -1,8 +1,7 @@
-use futures::{future, Future, Stream};
-use hyper::{self, Body, Client, Method, Request, Uri};
+use futures::{Future, Stream};
+use hyper::{self, Body, Client, Request, Uri};
 use log::*;
-use serde_json as serde;
-use std::{fs, thread, time::Duration, vec::Vec};
+use std::{fs, thread, vec::Vec};
 
 pub mod led {
     use gpio_cdev::*;
@@ -29,13 +28,13 @@ pub mod led {
         Duration::from_millis(500)
     }
 
-    pub fn blink(chip: String, line: u32, args: BlinkArguments) -> errors::Result<()> {
+    pub fn blink(chip: &String, line: &u32, args: &BlinkArguments) -> errors::Result<()> {
         debug!("{:?}", &args);
 
         let mut chip = Chip::new(chip)?;
 
         let handle = chip
-            .get_line(line)?
+            .get_line(*line)?
             .request(LineRequestFlags::OUTPUT, 1, "readinput")?;
 
         let start_time = Instant::now();
@@ -58,7 +57,7 @@ mod button {
 
     type PollEventFlags = nix::poll::EventFlags;
 
-    pub fn interrupt<F>(chip: String, lines: Vec<u32>, callback: F) -> errors::Result<()>
+    pub fn interrupt<F>(chip: &String, lines: &Vec<u32>, callback: F) -> errors::Result<()>
     where
         F: Fn(u32, gpio_cdev::LineEvent),
     {
@@ -68,7 +67,7 @@ mod button {
         let mut evt_handles: Vec<LineEventHandle> = lines
             .into_iter()
             .map(|off| {
-                let line = chip.get_line(off).unwrap();
+                let line = chip.get_line(*off).unwrap();
                 line.events(
                     LineRequestFlags::INPUT,
                     EventRequestFlags::RISING_EDGE,
@@ -114,55 +113,84 @@ mod button {
     }
 }
 
-// TODO: refactor - esp. params
-pub fn init(
-    gpio_chip: String,
-    led_line: Option<u32>,
-    led_button_line: Option<u32>,
-    display_button_line: Option<u32>,
-    led_address: Uri,
-    display_address: Uri,
-) {
+use crate::CONFIG;
+
+// TODO: pass in CONFIG...
+pub fn init() {
     let mut gpio_lines = Vec::new();
-    for line in [led_button_line, display_button_line].iter() {
+    for line in [CONFIG.led_button_line, CONFIG.display_button_line].iter() {
         if let Some(l) = *line {
             gpio_lines.push(l);
         }
     }
 
     if !gpio_lines.is_empty() {
-        thread::spawn(|| {
-            button::interrupt(gpio_chip, gpio_lines, |line, _event| {
-                if let Some(led_button_line) = led_button_line {
+        thread::spawn(move || {
+            button::interrupt(&CONFIG.gpio_chip, &gpio_lines, |line, _event| {
+                let led_addr: Uri = CONFIG.led_address.parse().unwrap();
+                let display_addr: Uri = CONFIG.display_address.parse().unwrap();
+
+                if let Some(led_button_line) = CONFIG.led_button_line {
                     if line == led_button_line {
                         let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
-
                         let fut = Client::new()
-                            .request(Request::post(led_address).body(body).unwrap())
+                            .request(Request::post(led_addr).body(body).unwrap())
                             .map(|res| debug!("{}", res.status()))
                             .map_err(|err| error!("{}", err));
 
-                        hyper::rt::spawn(fut);
-                        // TODO: make http call instead
-                        // led::blink(&gpio_chip, &led_line.unwrap(), &led_args).unwrap()
+                        // TODO: use existing rt?
+                        hyper::rt::run(fut);
                     }
                 }
 
-                if let Some(display_button_line) = display_button_line {
+                if let Some(display_button_line) = CONFIG.display_button_line {
                     if line == display_button_line {
                         // TODO: share client?
                         let fut = Client::new()
-                            .get(display_address)
+                            .get(display_addr)
                             .and_then(|res| res.into_body().concat2())
                             .and_then(|body| {
                                 fs::write("/tmp/widgets.json", body).unwrap();
                                 Ok(())
                             }).map_err(|err| error!("{}", err));
 
-                        hyper::rt::spawn(fut);
+                        // TODO: use existing rt?
+                        hyper::rt::run(fut);
                     }
                 }
             }).unwrap();
         });
     }
 }
+
+// TODO: do not hardcode config
+// pub fn init() {
+//     thread::spawn(|| {
+//         button::interrupt("/dev/gpiochip0".to_string(), vec![5, 6], |line, _event| {
+//             // LED button
+//             if line == 5 {
+//                 let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
+
+//                 let fut = Client::new()
+//                     .request(Request::post("http://raspberrypi.local".parse().unwrap()).body(body).unwrap())
+//                     .map(|res| debug!("{}", res.status()))
+//                     .map_err(|err| error!("{}", err));
+
+//                 hyper::rt::spawn(fut);
+//             }
+
+//             // display button
+//             if line == 6 {
+//                 let fut = Client::new()
+//                     .get("".parse().unwrap())
+//                     .and_then(|res| res.into_body().concat2())
+//                     .and_then(|body| {
+//                         fs::write("/tmp/widgets.json", body).unwrap();
+//                         Ok(())
+//                     }).map_err(|err| error!("{}", err));
+
+//                 hyper::rt::spawn(fut);
+//             }
+//         }).unwrap();
+//     });
+// }

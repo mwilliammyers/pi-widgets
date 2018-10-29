@@ -30,10 +30,13 @@ fn default_gpio_chip() -> String {
 }
 
 fn default_led_address() -> String {
-    "http://raspberrypi.local:8080/led".to_owned()
+    // TODO: for some reason hyper cannot resolve this but curl can...
+    // "http://raspberrypi.local:8080/led".to_owned()
+    "http://192.168.1.17:8080/led".to_owned()
 }
 
 fn default_display_address() -> String {
+    // TODO: for some reason hyper cannot resolve this but curl can...
     // "http://macpro.local:8080/led/configure".to_owned()
     "http://192.168.1.169:8080/led/configure".to_owned()
 }
