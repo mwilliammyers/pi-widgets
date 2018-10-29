@@ -3,7 +3,7 @@ use serde_derive::Deserialize;
 use std::net::SocketAddr;
 
 // TODO: use `hyper::Uri` when they implement `Deserialize`
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 pub struct EnvVars {
     #[serde(default = "default_self_address")]
     pub self_address: SocketAddr,
@@ -30,7 +30,7 @@ fn default_gpio_chip() -> String {
 }
 
 fn default_led_address() -> String {
-    "http://raspberrypi.local:8080".to_owned()
+    "http://raspberrypi.local:8080/led".to_owned()
 }
 
 fn default_display_address() -> String {

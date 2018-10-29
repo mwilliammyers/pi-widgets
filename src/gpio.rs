@@ -1,4 +1,8 @@
-use std::{thread, time::Duration, vec::Vec};
+use futures::{future, Future, Stream};
+use hyper::{self, Body, Client, Method, Request, Uri};
+use log::*;
+use serde_json as serde;
+use std::{fs, thread, time::Duration, vec::Vec};
 
 pub mod led {
     use gpio_cdev::*;
@@ -44,9 +48,9 @@ mod button {
 
     type PollEventFlags = nix::poll::EventFlags;
 
-    pub fn interrupt<F>(chip: &String, lines: &Vec<u32>, callback: F) -> errors::Result<()>
+    pub fn interrupt<F>(chip: &String, lines: &Vec<u32>, mut callback: F) -> errors::Result<()>
     where
-        F: Fn(u32, gpio_cdev::LineEvent),
+        F: FnMut(u32, gpio_cdev::LineEvent) + 'static,
     {
         let mut chip = Chip::new(chip)?;
 
@@ -100,11 +104,14 @@ mod button {
     }
 }
 
+// TODO: refactor - esp. params
 pub fn init(
     gpio_chip: String,
     led_line: Option<u32>,
     led_button_line: Option<u32>,
     display_button_line: Option<u32>,
+    led_address: Uri,
+    display_address: Uri,
 ) {
     let mut gpio_lines = Vec::new();
     for line in [led_button_line, display_button_line].iter() {
@@ -113,37 +120,47 @@ pub fn init(
         }
     }
 
-    if !gpio_lines.is_empty() {
-        thread::spawn(move || {
-            let mut led_args = led::BlinkArguments {
-                duration: Duration::from_millis(1000),
-                period: Duration::from_millis(250),
-            };
+    // let mut led_args = led::BlinkArguments {
+    //     duration: Duration::from_millis(1000),
+    //     period: Duration::from_millis(250),
+    // };
 
+    if !gpio_lines.is_empty() {
+        thread::spawn(|| {
             button::interrupt(&gpio_chip, &gpio_lines, |line, _event| {
                 if let Some(led_button_line) = led_button_line {
                     if line == led_button_line {
+                        // let json_file_path = Path::new("/tmp/widgets.json");
+                        // let json_file = File::open(json_file_path);
+                        // let deserialized_camera: SomeDataType = serde_json::from_reader(json_file);
+
+                        let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
+
+                        let fut = Client::new()
+                            .request(Request::post(led_address).body(body).unwrap())
+                            .map(|res| debug!("{}", res.status()))
+                            .map_err(|err| error!("{}", err));
+
+                        hyper::rt::spawn(fut);
                         // TODO: make http call instead
-                        led::blink(&gpio_chip, &led_line.unwrap(), &led_args).unwrap()
+                        // led::blink(&gpio_chip, &led_line.unwrap(), &led_args).unwrap()
                     }
                 }
 
-                // if let Some(display_button_line) = config.display_button_line {
-                //     if line == display_button_line {
-                //         let fut = fetch::json(config.display_address.parse().unwrap())
-                //             .map(|args| {
-                //                 info!("args: {:?}", args);
+                if let Some(display_button_line) = display_button_line {
+                    if line == display_button_line {
+                        // TODO: share client?
+                        let fut = Client::new()
+                            .get(display_address)
+                            .and_then(|res| res.into_body().concat2())
+                            .and_then(|body| {
+                                fs::write("/tmp/widgets.json", body).unwrap();
+                                Ok(())
+                            }).map_err(|err| error!("{}", err));
 
-                //                 led_args.duration = args[0].duration;
-                //                 led_args.period = args[0].period;
-                //             }).map_err(|e| match e {
-                //                 fetch::Error::Http(e) => error!("http error: {}", e),
-                //                 fetch::Error::Json(e) => error!("json parsing error: {}", e),
-                //             });
-
-                //         hyper::rt::run(fut);
-                //     }
-                // }
+                        hyper::rt::spawn(fut);
+                    }
+                }
             }).unwrap();
         });
     }

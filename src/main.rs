@@ -74,6 +74,8 @@ fn main() {
             config.led_line,
             config.led_button_line,
             config.display_button_line,
+            config.led_address.parse().unwrap(),
+            config.display_address.parse().unwrap(),
         );
 
         info!("listening on http://{}", &config.self_address);
