@@ -1,158 +1,95 @@
-//! A demonstration of recording to wav an input stream
+//! Records a WAV file (roughly 3 seconds long) using the default input device and format.
 //!
-//! Audio from the default input device is stored in to a wav file
+//! The input data is recorded to "$CARGO_MANIFEST_DIR/recorded.wav".
 
-extern crate portaudio;
+use std::{sync, thread, time};
 
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use cpal;
+use hound;
 
-extern crate hound;
-use hound::WavWriter;
-
-use std::fs;
-use std::io;
-use std::mem;
+// use std::{thread, time::Duration, sync::{Arc, sync::atomic::{AtomicBool, Ordering}}};
 
 fn main() {
-    const CHANNELS: i32 = 2;
-    const SAMPLE_RATE: f64 = 44_100.0;
-    const FRAMES: u32 = 256;
+    // Setup the default input device and stream with the default input format.
+    let device = cpal::default_input_device().unwrap();
+    let format = device.default_input_format().unwrap();
 
-    let audio_port = match open_audio_port() {
-        Ok(port) => port,
-        Err(error) => panic!(String::from(error)),
-    };
+    println!("Default input format: {:?}", format);
+    let event_loop = cpal::EventLoop::new();
+    let stream_id = event_loop.build_input_stream(&device, &format).unwrap();
+    event_loop.play_stream(stream_id);
 
-    let input_index = match get_input_device_index(&audio_port) {
-        Ok(index) => index,
-        Err(error) => panic!(String::from(error)),
-    };
+    // The WAV file we're recording to.
+    const PATH: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/recorded.wav");
+    let writer = hound::WavWriter::create(
+        PATH,
+        hound::WavSpec {
+            channels: format.channels,
+            sample_rate: format.sample_rate.0,
+            bits_per_sample: (format.data_type.sample_size() * 8) as u16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    ).unwrap();
+    let writer = sync::Arc::new(sync::Mutex::new(Some(writer)));
 
-    let input_settings =
-        match get_input_settings(input_index, &audio_port, SAMPLE_RATE, FRAMES, CHANNELS) {
-            Ok(settings) => settings,
-            Err(error) => panic!(String::from(error)),
-        };
+    // A flag to indicate that recording is in progress.
+    println!("Begin recording...");
+    let recording = sync::Arc::new(sync::atomic::AtomicBool::new(true));
 
-    let mut wav_writer = match get_wav_writer("recorded.wav", CHANNELS, SAMPLE_RATE) {
-        Ok(writer) => writer,
-        Err(error) => panic!(error),
-    };
+    // Run the input stream on a separate thread.
+    let writer_2 = writer.clone();
+    let recording_2 = recording.clone();
+    thread::spawn(move || {
+        event_loop.run(move |_, data| {
+            // If we're done recording, return early.
+            if !recording_2.load(sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            // Otherwise write to the wav writer.
+            match data {
+                cpal::StreamData::Input {
+                    buffer: cpal::UnknownTypeInputBuffer::U16(buffer),
+                } => {
+                    if let Ok(mut guard) = writer_2.try_lock() {
+                        if let Some(writer) = guard.as_mut() {
+                            for sample in buffer.iter() {
+                                let sample = cpal::Sample::to_i16(sample);
+                                writer.write_sample(sample).ok();
+                            }
+                        }
+                    }
+                }
+                cpal::StreamData::Input {
+                    buffer: cpal::UnknownTypeInputBuffer::I16(buffer),
+                } => {
+                    if let Ok(mut guard) = writer_2.try_lock() {
+                        if let Some(writer) = guard.as_mut() {
+                            for &sample in buffer.iter() {
+                                writer.write_sample(sample).ok();
+                            }
+                        }
+                    }
+                }
+                cpal::StreamData::Input {
+                    buffer: cpal::UnknownTypeInputBuffer::F32(buffer),
+                } => {
+                    if let Ok(mut guard) = writer_2.try_lock() {
+                        if let Some(writer) = guard.as_mut() {
+                            for sample in buffer.iter() {
+                                let sample = cpal::Sample::to_i16(sample);
+                                writer.write_sample(sample).ok();
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            }
+        });
+    });
 
-    let callback = move |portaudio::InputStreamCallbackArgs { buffer, .. }| {
-        for &sample in buffer.iter() {
-            wav_writer.write_sample(sample).ok();
-        }
-
-        portaudio::Continue
-    };
-
-    // Construct a stream with input and output sample types of f32.
-    let mut stream = match audio_port.open_non_blocking_stream(input_settings, callback) {
-        Ok(strm) => strm,
-        Err(error) => panic!(error.to_string()),
-    };
-
-    match stream.start() {
-        Ok(_) => {}
-        Err(error) => panic!(error.to_string()),
-    };
-
-    let start = Instant::now();
-
-    let time_to_wait = &(5 as u64);
-    while start.elapsed().as_secs().lt(time_to_wait) {
-        sleep(Duration::new(1, 0));
-        println!("{}[s] passed", start.elapsed().as_secs());
-    }
-
-    match close_stream(stream) {
-        Ok(_) => {}
-        Err(error) => panic!(error),
-    };
-}
-
-fn get_wav_writer(
-    path: &'static str,
-    channels: i32,
-    sample_rate: f64,
-) -> Result<WavWriter<io::BufWriter<fs::File>>, String> {
-    let spec = wav_spec(channels, sample_rate);
-    match hound::WavWriter::create(path, spec) {
-        Ok(writer) => Ok(writer),
-        Err(error) => Err(String::from(format!("{}", error))),
-    }
-}
-
-fn wav_spec(channels: i32, sample_rate: f64) -> hound::WavSpec {
-    hound::WavSpec {
-        channels: channels as _,
-        sample_rate: sample_rate as _,
-        bits_per_sample: (mem::size_of::<f32>() * 8) as _,
-        sample_format: hound::SampleFormat::Float,
-    }
-}
-
-fn close_stream(
-    mut stream: portaudio::Stream<portaudio::NonBlocking, portaudio::Input<f32>>,
-) -> Result<String, String> {
-    match stream.stop() {
-        Ok(_) => Ok(String::from("Stream closed")),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-fn open_audio_port() -> Result<portaudio::PortAudio, String> {
-    portaudio::PortAudio::new().or_else(|error| Err(String::from(format!("{}", error))))
-}
-
-fn get_input_device_index(
-    audio_port: &portaudio::PortAudio,
-) -> Result<portaudio::DeviceIndex, String> {
-    audio_port
-        .default_input_device()
-        .or_else(|error| Err(String::from(format!("{}", error))))
-}
-
-fn get_input_latency(
-    audio_port: &portaudio::PortAudio,
-    input_index: portaudio::DeviceIndex,
-) -> Result<f64, String> {
-    let input_device_information = audio_port
-        .device_info(input_index)
-        .or_else(|error| Err(String::from(format!("{}", error))));
-    Ok(input_device_information.unwrap().default_low_input_latency)
-}
-
-fn get_input_stream_parameters(
-    input_index: portaudio::DeviceIndex,
-    latency: f64,
-    channels: i32,
-) -> Result<portaudio::StreamParameters<f32>, String> {
-    const INTERLEAVED: bool = true;
-    Ok(portaudio::StreamParameters::<f32>::new(
-        input_index,
-        channels,
-        INTERLEAVED,
-        latency,
-    ))
-}
-
-fn get_input_settings(
-    input_index: portaudio::DeviceIndex,
-    audio_port: &portaudio::PortAudio,
-    sample_rate: f64,
-    frames: u32,
-    channels: i32,
-) -> Result<portaudio::InputStreamSettings<f32>, String> {
-    Ok(portaudio::InputStreamSettings::new(
-        (get_input_stream_parameters(
-            input_index,
-            (get_input_latency(&audio_port, input_index))?,
-            channels,
-        ))?,
-        sample_rate,
-        frames,
-    ))
+    // Let recording go for roughly three seconds.
+    thread::sleep(time::Duration::from_secs(5));
+    recording.store(false, sync::atomic::Ordering::Relaxed);
+    writer.lock().unwrap().take().unwrap().finalize().unwrap();
+    println!("Recording {} complete!", PATH);
 }
