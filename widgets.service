@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/local/bin/widgets
-Environment=RUST_LOG=info
+Environment=RUST_LOG=widgets=debug,hyper=debug WIDGETS_LED_LINE=26 WIDGETS_LED_BUTTON_LINE=5 WIDGETS_DISPLAY_BUTTON_LINE=6
 Restart=always
 
 [Install]
