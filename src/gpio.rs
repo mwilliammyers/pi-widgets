@@ -4,13 +4,14 @@ use log::*;
 use std::{fs, thread, vec::Vec};
 
 pub mod led {
-    use gpio_cdev::*;
-    use log::*;
-    use serde_derive::{Deserialize, Serialize};
     use std::{
         thread,
         time::{Duration, Instant},
     };
+
+    use gpio_cdev::{errors, Chip, LineRequestFlags};
+    use log::*;
+    use serde_derive::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct BlinkArguments {
@@ -54,12 +55,11 @@ pub mod led {
 }
 
 mod button {
-    use gpio_cdev::*;
-    use log::*;
-    use nix::poll::*;
     use std::os::unix::io::AsRawFd;
 
-    type PollEventFlags = nix::poll::EventFlags;
+    use gpio_cdev::{errors, Chip, EventRequestFlags, LineEventHandle, LineRequestFlags};
+    use log::*;
+    use nix::poll::{poll, EventFlags, PollFd};
 
     pub fn interrupt<F>(chip: &String, lines: &Vec<u32>, callback: F) -> errors::Result<()>
     where
@@ -82,12 +82,8 @@ mod button {
         // Create a vector of file descriptors for polling
         let mut pollfds: Vec<PollFd> = evt_handles
             .iter()
-            .map(|h| {
-                PollFd::new(
-                    h.as_raw_fd(),
-                    PollEventFlags::POLLIN | PollEventFlags::POLLPRI,
-                )
-            }).collect();
+            .map(|h| PollFd::new(h.as_raw_fd(), EventFlags::POLLIN))
+            .collect();
 
         loop {
             if poll(&mut pollfds, -1)? == 0 {
@@ -98,19 +94,11 @@ mod button {
             for (i, fd) in pollfds.iter().enumerate() {
                 if let Some(revts) = fd.revents() {
                     let h = &mut evt_handles[i];
+                    let event = h.get_event()?;
 
-                    if revts.contains(PollEventFlags::POLLPRI) {
-                        error!("[{}] got a POLLPRI", h.line().offset());
-                        continue;
-                    }
+                    debug!("[{}] {:?}", h.line().offset(), event);
 
-                    if revts.contains(PollEventFlags::POLLIN) {
-                        let event = h.get_event()?;
-
-                        debug!("[{}] {:?}", h.line().offset(), event);
-
-                        callback(h.line().offset(), event);
-                    }
+                    callback(h.line().offset(), event);
                 }
             }
         }
@@ -119,50 +107,48 @@ mod button {
 
 use crate::CONFIG;
 
-// TODO: pass in CONFIG...
+// TODO: refactor: pass in config? or accept a hashmap of buttons to functions?
 pub fn init() {
-    let mut gpio_lines = Vec::new();
-    for line in [CONFIG.led_button_line, CONFIG.display_button_line].iter() {
-        if let Some(l) = *line {
-            gpio_lines.push(l);
-        }
+    let all_gpio_lines = [CONFIG.led_button_line, CONFIG.display_button_line];
+    let gpio_lines: Vec<u32> = all_gpio_lines.iter().filter_map(|line| *line).collect();
+
+    if gpio_lines.is_empty() {
+        return;
     }
 
-    if !gpio_lines.is_empty() {
-        thread::spawn(move || {
-            button::interrupt(&CONFIG.gpio_chip, &gpio_lines, |line, _event| {
-                let led_addr: Uri = CONFIG.led_address.parse().unwrap();
-                let display_addr: Uri = CONFIG.display_address.parse().unwrap();
+    thread::spawn(move || {
+        button::interrupt(&CONFIG.gpio_chip, &gpio_lines, |line, _event| {
+            let led_addr: Uri = CONFIG.led_address.parse().unwrap();
+            let display_addr: Uri = CONFIG.display_address.parse().unwrap();
 
-                if let Some(led_button_line) = CONFIG.led_button_line {
-                    if line == led_button_line {
-                        let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
-                        let fut = Client::new()
-                            .request(Request::post(led_addr).body(body).unwrap())
-                            .map(|res| debug!("{}", res.status()))
-                            .map_err(|err| error!("{}", err));
+            if let Some(led_button_line) = CONFIG.led_button_line {
+                if line == led_button_line {
+                    let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
+                    let fut = Client::new()
+                        .request(Request::post(led_addr).body(body).unwrap())
+                        .map(|res| debug!("{}", res.status()))
+                        .map_err(|err| error!("{}", err));
 
-                        // TODO: use existing rt?
-                        hyper::rt::run(fut);
-                    }
+                    // TODO: use existing rt?
+                    hyper::rt::run(fut);
                 }
+            }
 
-                if let Some(display_button_line) = CONFIG.display_button_line {
-                    if line == display_button_line {
-                        // TODO: share client?
-                        let fut = Client::new()
-                            .get(display_addr)
-                            .and_then(|res| res.into_body().concat2())
-                            .and_then(|body| {
-                                fs::write("/tmp/widgets.json", body).unwrap();
-                                Ok(())
-                            }).map_err(|err| error!("{}", err));
+            if let Some(display_button_line) = CONFIG.display_button_line {
+                if line == display_button_line {
+                    // TODO: share client?
+                    let fut = Client::new()
+                        .get(display_addr)
+                        .and_then(|res| res.into_body().concat2())
+                        .and_then(|body| {
+                            fs::write("/tmp/widgets.json", body).unwrap();
+                            Ok(())
+                        }).map_err(|err| error!("{}", err));
 
-                        // TODO: use existing rt?
-                        hyper::rt::run(fut);
-                    }
+                    // TODO: use existing rt?
+                    hyper::rt::run(fut);
                 }
-            }).unwrap();
-        });
-    }
+            }
+        }).unwrap();
+    });
 }

@@ -1,3 +1,5 @@
+use std::{io, io::Write, time::Duration};
+
 use futures::{future, stream::Stream, Future};
 use hyper::{
     client::HttpConnector, header, service::service_fn, Body, Client, Method, Request, Response,
@@ -8,7 +10,6 @@ use log::*;
 use regex::Regex;
 use serde_derive::Deserialize;
 use serde_json as serde;
-use std::{io, io::Write, time::Duration};
 
 mod config;
 mod gpio;
