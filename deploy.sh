@@ -8,4 +8,5 @@ name=$(cargo metadata --no-deps --format-version 1 | perl -n -e '/name":\s*"(.*?
 
 cargo build --target $target --release && \
 	scp ./target/$target/release/$name pi@$host:/tmp && \
-	ssh -t pi@$host "sudo mv /tmp/$name /usr/local/bin && sudo systemctl restart $name"
+	echo "DONE"
+	# ssh -t pi@$host "sudo mv /tmp/$name /usr/local/bin && sudo systemctl restart $name"

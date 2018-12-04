@@ -33,8 +33,7 @@ fn main() {
     let writer = sync::Arc::new(sync::Mutex::new(Some(writer)));
 
     // A flag to indicate that recording is in progress.
-    println!("Begin recording...");
-    let recording = sync::Arc::new(sync::atomic::AtomicBool::new(true));
+    let recording = sync::Arc::new(sync::atomic::AtomicBool::new(false));
 
     // Run the input stream on a separate thread.
     let writer_2 = writer.clone();
@@ -87,9 +86,14 @@ fn main() {
         });
     });
 
-    // Let recording go for roughly three seconds.
-    thread::sleep(time::Duration::from_secs(5));
+    println!("prepare for recording!");
+    thread::sleep(time::Duration::from_secs(3));
+    println!("Begin recording...");
+    recording.store(true, sync::atomic::Ordering::Relaxed);
+    
+    thread::sleep(time::Duration::from_secs(7));
     recording.store(false, sync::atomic::Ordering::Relaxed);
+    
     writer.lock().unwrap().take().unwrap().finalize().unwrap();
     println!("Recording {} complete!", PATH);
 }

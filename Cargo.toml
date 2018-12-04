@@ -5,12 +5,12 @@ authors = ["William Myers <mwilliammyers@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-cpal = "0.8.2"
+# cpal = "0.8.2"
 env_logger = "0.5.13"
 envy = "0.3"
 futures = "0.1.21"
 gpio-cdev = "0.1.0"
-hound = "3.4.0"
+# hound = "3.4.0"
 hyper = "0.12"
 lazy_static = "1.1.0"
 log = "0.4.0"

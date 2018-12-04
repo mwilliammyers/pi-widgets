@@ -121,10 +121,15 @@ pub fn init() {
             let led_addr: Uri = CONFIG.led_address.parse().unwrap();
             let display_addr: Uri = CONFIG.display_address.parse().unwrap();
 
+            // TODO: share client from outside thread?
+            let client = Client::new();
+
+            debug!("button {}", &line);
+
             if let Some(led_button_line) = CONFIG.led_button_line {
                 if line == led_button_line {
                     let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
-                    let fut = Client::new()
+                    let fut = client
                         .request(Request::post(led_addr).body(body).unwrap())
                         .map(|res| debug!("{}", res.status()))
                         .map_err(|err| error!("{}", err));
@@ -136,8 +141,7 @@ pub fn init() {
 
             if let Some(display_button_line) = CONFIG.display_button_line {
                 if line == display_button_line {
-                    // TODO: share client?
-                    let fut = Client::new()
+                    let fut = client
                         .get(display_addr)
                         .and_then(|res| res.into_body().concat2())
                         .and_then(|body| {
