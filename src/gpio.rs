@@ -124,10 +124,11 @@ pub fn init() {
         button::interrupt(&CONFIG.gpio_chip, &gpio_lines, |line, _event| {
             let led_addr: Uri = CONFIG.led_address.parse().unwrap();
             let display_addr: Uri = CONFIG.display_address.parse().unwrap();
+            let led_config = &CONFIG.led_config;
 
             if let Some(led_button_line) = CONFIG.led_button_line {
                 if line == led_button_line {
-                    let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
+                    let body = Body::from(fs::read(led_config).unwrap());
                     // TODO: share client from outside thread?
                     let fut = Client::new()
                         .request(Request::post(led_addr).body(body).unwrap())
@@ -145,8 +146,8 @@ pub fn init() {
                     let fut = Client::new()
                         .get(display_addr)
                         .and_then(|res| res.into_body().concat2())
-                        .and_then(|body| {
-                            fs::write("/tmp/widgets.json", body).unwrap();
+                        .and_then(move |body| {
+                            fs::write(led_config, body).unwrap();
                             Ok(())
                         }).map_err(|err| error!("{}", err));
 
