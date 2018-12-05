@@ -92,13 +92,16 @@ mod button {
             }
 
             for (i, fd) in pollfds.iter().enumerate() {
+                let h = &mut evt_handles[i];
+
                 if let Some(revts) = fd.revents() {
-                    let h = &mut evt_handles[i];
-                    let event = h.get_event()?;
+                    if revts.contains(EventFlags::POLLIN) {
+                        let event = h.get_event()?;
 
-                    debug!("[{}] {:?}", h.line().offset(), event);
+                        debug!("[{}] {:?}", h.line().offset(), event);
 
-                    callback(h.line().offset(), event);
+                        callback(h.line().offset(), event);
+                    }
                 }
             }
         }
@@ -116,20 +119,17 @@ pub fn init() {
         return;
     }
 
+    debug!("setting up gpio_lines: {:?}", &gpio_lines);
     thread::spawn(move || {
         button::interrupt(&CONFIG.gpio_chip, &gpio_lines, |line, _event| {
             let led_addr: Uri = CONFIG.led_address.parse().unwrap();
             let display_addr: Uri = CONFIG.display_address.parse().unwrap();
 
-            // TODO: share client from outside thread?
-            let client = Client::new();
-
-            debug!("button {}", &line);
-
             if let Some(led_button_line) = CONFIG.led_button_line {
                 if line == led_button_line {
                     let body = Body::from(fs::read("/tmp/widgets.json").unwrap());
-                    let fut = client
+                    // TODO: share client from outside thread?
+                    let fut = Client::new()
                         .request(Request::post(led_addr).body(body).unwrap())
                         .map(|res| debug!("{}", res.status()))
                         .map_err(|err| error!("{}", err));
@@ -141,7 +141,8 @@ pub fn init() {
 
             if let Some(display_button_line) = CONFIG.display_button_line {
                 if line == display_button_line {
-                    let fut = client
+                    // TODO: share client from outside thread?
+                    let fut = Client::new()
                         .get(display_addr)
                         .and_then(|res| res.into_body().concat2())
                         .and_then(|body| {
